@@ -7,8 +7,15 @@ mov al, byte 5
 .String
 	db "test", 0
 jmp $
+jeq .Label
+int
+.Func
+	mov eax, .String
+	ret
+cal .Func
 hlt
 """
+# output: b"\xc2\x80@\x05\xc2\x80D@\xc2\x81D\xc2\x85B\x03test\x00B\x10E\x03\x04\xc2\x80D\x0b\x08G\x15\x03"
 
 class Operation(object):
 	"""
@@ -163,4 +170,4 @@ def assemble(text):
 
 if __name__ == '__main__':
 	res = assemble(source)
-	print(res.binary)
+	print(res.binary.encode("utf-8"))
