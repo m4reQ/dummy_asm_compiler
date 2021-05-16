@@ -17,6 +17,114 @@ hlt
 """
 # output: b"\xc2\x80@\x05\xc2\x80D@\xc2\x81D\xc2\x85B\x03test\x00B\x10E\x03\x04\xc2\x80D\x0b\x08G\x15\x03"
 
+# bits numeration:
+# most significant bit - 0
+#
+# instruction structure:
+# op [arg, ...]
+#
+# operation structure:
+# size: 1 byte
+# 0b00000000
+# bits:
+# 2 - 8 => opcode
+# 0 - 2 => args count
+#
+# preprocessor directive structure:
+# keyword [arg, ...]
+#
+# preprocessor keywords:
+# db [*byte, optional:termination_character]: define bytes
+# const [type, value]: define constant
+#
+# types:
+# byte - 8 bits
+# word - 16 bits
+#
+# address size: word
+# address wildcard character: $
+# expands to address of used instruction
+# 
+# example:
+# 0x00 jmp $     is the same as
+# 0x00 jmp 0x00
+#
+# value at address argument: [address]
+# expands to the value faund at given address
+# example:
+# 0x00 "h"
+# 0x01 mov eax, [0x00]   is the same as
+# 0x00 "h"
+# 0x01 mov eax, "h"
+#
+# label structure:
+# .[label_name]
+# expands to address of next instruction
+# 
+# argument structure:
+# [type, value]
+#
+# value structure:
+# 0b00...
+# bits:
+# 0 => is register index (1 if true)
+# 1 => argument type (0 for byte, 1 for word)
+# 2 - n => value
+#
+# register size: word
+#
+# registers literals:
+# ax - acummulator
+# bx - base register
+# sp - stack pointer register
+# bp - stack base pointer register
+# 
+# x replacements:
+# l - register's lower byte
+# h - register's higher byte
+#
+# flags register structure:
+# 0b0000000000000000 (word)
+# bits:
+# 0 => zero flag (set if operation result is 0)
+# 1 => sign flag (set if operation result is negative)
+# 2 => parity flag (set if operation result is a multiple of 2)
+# 3 => carry flag (set if addition result overflows register or subtraction result is negative)
+# 4 => interruption flag (set if interrupts are enabled)
+# 5 => overflow flag (set if operation overflows register)
+# 6 => stack overflow flag (set if push* operation causes stack overflow)
+# 7 - 16 => unused
+#
+# operations list:
+# add - add and store in ax, args: [register or value, register or value]
+# adc - add with carry and store in ax, args: same as add
+# div - divide and store in ax, args: same as adc
+# mul - multiply and store in ax, args: same as div
+# sub - subtract and store in ax, args: same as mul
+# sbb - subtract with borrow and store in ax, args: same as sub
+# and - logical AND ax with value and store in ax, args: [value]
+# or  - logical OR ax with value and store in ax, same as and
+# xor - logical XOR ax with value and store in ax, same as or
+# sl - shift ax left and store in ax, args: same as xor
+# sr - shift ax right and store in ax, args: same as sl
+# not - logical NOT of ax and store in ax, args: None
+# call - call procedure and put address of next instruction on stack, args: [procedure address]
+# ret - return from procedure and pop address of next instruction after call from stack, args: None
+# sys - call a syscall, args: [syscall index]
+# inc - increment by one, args: [register]
+# dec - decrement by one, args: [register]
+# hlt - stop processor, args: None
+# int - call interupt, args: [interrupt index]
+# jmp - jump to address, args [address]
+# jeq - jump to address if zero flag set, args: same as jmp
+# jne - jump to address if zero flag not set, args: same as jeq
+# mov - move data from one location to another, args: [register or value, register or value] 
+# nop - no operation, args: None
+# pop - pop data from stack, args: None
+# push - push data onto stack, args: [value]
+# pushf - push flags register onto stack, args: None
+# test - logical AND and set zero flag, args: [value or register, value or register]
+
 class Operation(object):
 	"""
 	    10      000001 (1 byte)
