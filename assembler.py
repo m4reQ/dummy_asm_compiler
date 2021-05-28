@@ -46,15 +46,25 @@ hlt
 # word - 16 bits
 #
 # address size: word
+#
+# reserved address values:
+# 0x0 -> accumulator
+# 0x2 -> base pointer
+# 0x4 -> stack pointer
+# 0x6 -> stack base pointer (always equal to 0xa)
+# 0x8 -> flags register
+# 0xa - 0x40a -> stack (1 kb)
+#
+# base program address: 0x40c (just after end of stack)
+# 
 # address wildcard character: $
 # expands to address of used instruction
-# 
 # example:
 # 0x00 jmp $     is the same as
 # 0x00 jmp 0x00
 #
 # value at address argument: [address]
-# expands to the value faund at given address
+# expands to the value found at given address
 # example:
 # 0x00 "h"
 # 0x01 mov eax, [0x00]   is the same as
@@ -71,7 +81,7 @@ hlt
 # value structure:
 # 0b00...
 # bits:
-# 0 => is register index (1 if true)
+# 0 => is value or address (1 if value)
 # 1 => argument type (0 for byte, 1 for word)
 # 2 - n => value
 #
@@ -125,7 +135,7 @@ hlt
 # jmp - jump to address, args [address]
 # jeq - jump to address if zero flag set, args: same as jmp
 # jne - jump to address if zero flag not set, args: same as jeq
-# mov - move data from one location to another, args: [register or value, register or value] 
+# mov - move address to certain location to another, args: [register or memory address, register or memory address]
 # nop - no operation, args: None
 # pop - pop data from stack, args: None
 # push - push data onto stack, args: [value]
@@ -202,7 +212,10 @@ def handle_preprocessor_directive(line, assembly):
 		if len(args) not in [1, 2]:
 			raise CompilerError(f"Preprocessor error: Invalid 'db' args count: {len(args)}")
 		
-		new_line = args[0].replace('"', '')
+		if args[0].find('"') != -1:
+			new_line = args[0].replace('"', '')
+		else:
+			new_line = chr(int(args[0]))
 		if len(args) == 2:
 			new_line += chr(int(args[1]))
 
@@ -223,7 +236,7 @@ def handle_preprocessor_directive(line, assembly):
 			arg = args[1].replace("word", '')
 			arg = int(arg) + ARG_TYPE_WORD
 		else:
-			raise CompilerError(f"Preprocessor error: invalid argument: '{args[1]}'")
+			raise CompilerError(f"Preprocessor error: invalid type of argument: '{args[1]}'")
 
 		const_name = args[0]
 		const_value = arg
@@ -231,7 +244,6 @@ def handle_preprocessor_directive(line, assembly):
 		assembly.constants[const_name] = const_value
 
 	return None
-	
 
 def assemble(source):
 	assembly = Assembly()
@@ -241,6 +253,7 @@ def assemble(source):
 		l = handle_preprocessor_directive(line, assembly)
 		if l:
 			lines[idx] = l
+			continue
 	
 	return assembly
 
