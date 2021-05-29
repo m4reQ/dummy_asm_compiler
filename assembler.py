@@ -14,6 +14,8 @@ resw 2
 	db "test", 0x0
 .Data
 	dw 0x1
+.EmptySpace
+	resb 10
 """
 # output: b"\xc2\x80@\x05\xc2\x80D@\xc2\x81D\xc2\x85B\x03test\x00B\x10E\x03\x04\xc2\x80D\x0b\x08G\x15\x03"
 
@@ -114,11 +116,12 @@ def handle_directive(line, line_idx, assembly):
 
 	if dir == "const":
 		args = line.split(' ')[1:]
+		args = [arg for arg in args if arg != '']
 		if len(args) != 3:
 			raise CompilerError(f"Invalid arguments count for const directive: {len(args)}", line_idx)
 		
 		value = try_convert_to_int(args[-1])
-		if not value:
+		if value is None:
 			value = ord(args[-1])
 
 		if args[1] == "byte":
@@ -138,7 +141,7 @@ def handle_directive(line, line_idx, assembly):
 
 		for arg in args:
 			value = try_convert_to_int(arg)
-			if not value: #means we have string here so we trim every byte and append it to repr
+			if value is None: #means we have string here so we trim every byte and append it to repr
 				arg = arg.replace('"', '')
 				for char in arg:
 					directive.representation += chr(ord(char) & 0xff) #we mask it to get only lower part as we define byte not word
@@ -153,7 +156,7 @@ def handle_directive(line, line_idx, assembly):
 		
 		for arg in args:
 			value = try_convert_to_int(arg)
-			if not value:
+			if value is None:
 				raise CompilerError(f"Define byte directive doesn't accept strings as input.", line_idx)
 			
 			directive.representation += chr(value >> 8) + chr(value & 0xff) #we separate upper and lower part of word and save them as separate bytes
@@ -163,6 +166,8 @@ def handle_directive(line, line_idx, assembly):
 			raise CompilerError(f"Didn't specify arguments for reserve byte directive.", line_idx)
 		
 		count = try_convert_to_int(args[1])
+		if count is None:
+			raise CompilerError(f"Invalid argument for reserve byte directive: '{args[1]}'", line_idx)
 		directive.representation += '\0' * count
 	elif dir == "resw":
 		args = line.split(' ')
