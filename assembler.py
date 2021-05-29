@@ -1,5 +1,5 @@
 source = """
-const CONST_VAL byte 0x4
+const CONST_VAL byte 0x4 ;define constant value of 4
 db "test"
 db "test", 0x5
 db 6, 7
@@ -7,7 +7,7 @@ dw 0x8
 resb 7
 resw 2
 .Label
-	add ax, [.Data]
+	add ax, word [.Data]
 	sys 0x1
 	jmp .Label
 .String
@@ -55,11 +55,11 @@ DIRECTIVES = [
 	"const"
 ]
 
-ARG_TYPE_BYTE = 0b00000000
-ARG_TYPE_WORD = 0b01000000
+ARG_TYPE_BYTE = 0
+ARG_TYPE_WORD = 16384
 
-ARG_TYPE_ADDRESS = 0b00000000
-ARG_TYPE_VALUE = 0b10000000
+ARG_TYPE_ADDRESS = 0
+ARG_TYPE_VALUE = 32768
 
 class Assembly(object):
 	def __init__(self):
@@ -138,10 +138,12 @@ def handle_directive(line, line_idx, assembly):
 
 		for arg in args:
 			value = try_convert_to_int(arg)
-			if not value: #means we have string here so we trim and append it to directive repr
-				directive.representation += arg.replace('"', '')
+			if not value: #means we have string here so we trim every byte and append it to repr
+				arg = arg.replace('"', '')
+				for char in arg:
+					directive.representation += chr(ord(char) & 0xff) #we mask it to get only lower part as we define byte not word
 			else: #means we encountered int written as string so we decode it as a raw byte
-				directive.representation += chr(value)
+				directive.representation += chr(value & 0xff)
 	elif dir == "dw":
 		args = line.split(' ')
 		if len(args) < 2:
@@ -154,7 +156,7 @@ def handle_directive(line, line_idx, assembly):
 			if not value:
 				raise CompilerError(f"Define byte directive doesn't accept strings as input.", line_idx)
 			
-			directive.representation += '\0' + chr(value)
+			directive.representation += chr(value >> 8) + chr(value & 0xff) #we separate upper and lower part of word and save them as separate bytes
 	elif dir == "resb":
 		args = line.split(' ')
 		if len(args) < 2:
