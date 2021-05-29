@@ -1,145 +1,21 @@
 source = """
-const CNST, word 64
-mov al, byte 5
+const CONST_VAL byte 0x4
+db "test"
+db "test", 0x5
+db 6, 7
+dw 0x8
+resb 7
+resw 2
 .Label
-	mov eax, al
-	add eax, word 5
+	add ax, [.Data]
+	sys 0x1
 	jmp .Label
 .String
-	db "test", 0
-jmp $
-jeq .Label
-.Func
-	mov eax, [.Number]
-	and CNST			; this is a comment
-	nop
-	ret
-call .Func
-.Number
-	db 0x01
-hlt
+	db "test", 0x0
+.Data
+	dw 0x1
 """
 # output: b"\xc2\x80@\x05\xc2\x80D@\xc2\x81D\xc2\x85B\x03test\x00B\x10E\x03\x04\xc2\x80D\x0b\x08G\x15\x03"
-
-# bits numeration:
-# most significant bit - 0
-#
-# instruction structure:
-# op [arg, ...]
-#
-# operation structure:
-# size: 1 byte
-# 0b00000000
-# bits:
-# 2 - 8 => opcode
-# 0 - 2 => args count
-#
-# preprocessor directive structure:
-# keyword [arg, ...]
-#
-# preprocessor keywords:
-# db [*byte, optional:termination_character]: define bytes
-# const [name, type value]: define constant
-#
-# types:
-# byte - 8 bits
-# word - 16 bits
-#
-# address size: word
-#
-# reserved address values:
-# 0x0 -> accumulator
-# 0x2 -> base pointer
-# 0x4 -> stack pointer
-# 0x6 -> stack base pointer (always equal to 0xa)
-# 0x8 -> flags register
-# 0xa - 0x40a -> stack (1 kb)
-#
-# base program address: 0x40c (just after end of stack)
-# 
-# address wildcard character: $
-# expands to address of used instruction
-# example:
-# 0x00 jmp $     is the same as
-# 0x00 jmp 0x00
-#
-# value at address argument: [address]
-# expands to the value found at given address
-# example:
-# 0x00 "h"
-# 0x01 mov eax, [0x00]   is the same as
-# 0x00 "h"
-# 0x01 mov eax, "h"
-#
-# label structure:
-# .[label_name]
-# expands to address of next instruction
-# 
-# argument structure:
-# [type, value]
-#
-# value structure:
-# 0b00...
-# bits:
-# 0 => is value or address (1 if value)
-# 1 => argument type (0 for byte, 1 for word)
-# 2 - n => value
-#
-# comment structure:
-# ;[comment]
-#
-# register size: word
-#
-# registers literals:
-# ax - acummulator
-# bx - base register
-# sp - stack pointer register
-# bp - stack base pointer register
-# 
-# x replacements:
-# l - register's lower byte
-# h - register's higher byte
-#
-# flags register structure:
-# 0b0000000000000000 (word)
-# bits:
-# 0 => zero flag (set if operation result is 0)
-# 1 => sign flag (set if operation result is negative)
-# 2 => parity flag (set if operation result is a multiple of 2)
-# 3 => carry flag (set if addition result overflows register or subtraction result is negative)
-# 4 => interruption flag (set if interrupts are enabled)
-# 5 => overflow flag (set if operation overflows register)
-# 6 => stack overflow flag (set if push* operation causes stack overflow)
-# 7 - 16 => unused
-#
-# operations list:
-# add - add and store in ax, args: [register or value, register or value]
-# adc - add with carry and store in ax, args: same as add
-# div - divide and store in ax, args: same as adc
-# mul - multiply and store in ax, args: same as div
-# sub - subtract and store in ax, args: same as mul
-# sbb - subtract with borrow and store in ax, args: same as sub
-# and - logical AND ax with value and store in ax, args: [value]
-# or  - logical OR ax with value and store in ax, same as and
-# xor - logical XOR ax with value and store in ax, same as or
-# sl - shift ax left and store in ax, args: same as xor
-# sr - shift ax right and store in ax, args: same as sl
-# not - logical NOT of ax and store in ax, args: None
-# call - call procedure and put address of next instruction on stack, args: [procedure address]
-# ret - return from procedure and pop address of next instruction after call from stack, args: None
-# sys - call a syscall, args: [syscall index]
-# inc - increment by one, args: [register]
-# dec - decrement by one, args: [register]
-# hlt - stop processor, args: None
-# int - call interupt, args: [interrupt index]
-# jmp - jump to address, args [address]
-# jeq - jump to address if zero flag set, args: same as jmp
-# jne - jump to address if zero flag not set, args: same as jeq
-# mov - move address to certain location to another, args: [register or memory address, register or memory address]
-# nop - no operation, args: None
-# pop - pop data from stack, args: None
-# push - push data onto stack, args: [value]
-# test - logical AND and set zero flag if not equal, args: [value or register, value or register]
 
 OPERATIONS = {
 	"add":  0b10000000,
@@ -173,35 +49,165 @@ OPERATIONS = {
 
 DIRECTIVES = [
 	"db",
+	"dw",
+	"resb",
+	"resw",
 	"const"
 ]
 
 ARG_TYPE_BYTE = 0b00000000
-ARG_TYPE_WORD = 0b10000000
+ARG_TYPE_WORD = 0b01000000
+
+ARG_TYPE_ADDRESS = 0b00000000
+ARG_TYPE_VALUE = 0b10000000
 
 class Assembly(object):
 	def __init__(self):
 		self.labels = {}
 		self.constants = {}
-		self.line_addresses = [0,]
 		self.binary = ""
 		self.size = 0
+		self.instructions = []
+
+class Instruction(object):
+	def __init__(self):
+		self.address = 0
+		self.operation = None
+		self.args = []
+
+	def __repr__(self):
+		return f"{hex(self.address)}: {self.operation.upper()} [{', '.join(self.args)}]"
+
+class Directive(object):
+	def __init__(self):
+		self.representation = ""
+	
+	def __repr__(self):
+		return f"DIRECTIVE bytesize: {len(self.representation)} value: {self.representation}"
+
+class Argument(object):
+	def __init__(self):
+		self.type = None
+		self.value = None
+
+	def __repr__(self):
+		return f"{self.type}:{self.value}"
 
 class CompilerError(Exception):
-	def __init__(self, msg):
-		super().__init__(msg)
+	def __init__(self, msg, inst_num: int):
+		super().__init__(f"Error occured at instruction {inst_num}: {msg}")
 
-def create_lines(text):
-	lines = [x for x in text.split('\n') if x != '']
-	newLines = []
+class ArgType:
+	Byte = "BYTE"
+	Word = "WORD"
 
-	for l in lines:
-		formatted = l.replace('\t', '')
-		if formatted.find(';') != -1:
-			formatted = formatted.split(';')[0]
-		newLines.append(formatted)
+def try_convert_to_int(string):
+	try:
+		return int(string, 0)
+	except Exception:
+		return None
 
-	return newLines
+def handle_directive(line, line_idx, assembly):
+	directive = Directive()
+	
+	dir = line.split(' ')[0]
+
+	if dir == "const":
+		args = line.split(' ')[1:]
+		if len(args) != 3:
+			raise CompilerError(f"Invalid arguments count for const directive: {len(args)}", line_idx)
+		
+		value = try_convert_to_int(args[-1])
+		if not value:
+			value = ord(args[-1])
+
+		if args[1] == "byte":
+			value += ARG_TYPE_BYTE
+		elif args[1] == "word":
+			value += ARG_TYPE_WORD
+		else:
+			raise CompilerError(f"Invalid const value type '{args[2]}'", line_idx)
+
+		assembly.constants[args[0]] = value
+	elif dir == "db":
+		args = line.split(' ')
+		if len(args) < 2:
+			raise CompilerError(f"Didn't specify arguments for define byte directive.", line_idx)
+		
+		args = [x.replace(',', '') for x in args[1:]]
+
+		for arg in args:
+			value = try_convert_to_int(arg)
+			if not value: #means we have string here so we trim and append it to directive repr
+				directive.representation += arg.replace('"', '')
+			else: #means we encountered int written as string so we decode it as a raw byte
+				directive.representation += chr(value)
+	elif dir == "dw":
+		args = line.split(' ')
+		if len(args) < 2:
+			raise CompilerError(f"Didn't specify arguments for define word directive.", line_idx)
+		
+		args = args[1].split(',')
+		
+		for arg in args:
+			value = try_convert_to_int(arg)
+			if not value:
+				raise CompilerError(f"Define byte directive doesn't accept strings as input.", line_idx)
+			
+			directive.representation += '\0' + chr(value)
+	elif dir == "resb":
+		args = line.split(' ')
+		if len(args) < 2:
+			raise CompilerError(f"Didn't specify arguments for reserve byte directive.", line_idx)
+		
+		count = try_convert_to_int(args[1])
+		directive.representation += '\0' * count
+	elif dir == "resw":
+		args = line.split(' ')
+		if len(args) < 2:
+			raise CompilerError(f"Didn't specify arguments for reserve word directive.", line_idx)
+		
+		count = try_convert_to_int(args[1])
+		directive.representation += "\0\0" * count
+	
+	assembly.size += len(directive.representation)
+
+	return directive
+
+def handle_label(line, assembly):
+	label_name = line.replace('.', '')
+	assembly.labels[label_name] = assembly.size
+
+	return Directive()
+
+def handle_instruction(line, line_idx, assembly):
+	return None
+
+def prepare_source(text):
+	new_lines = []
+
+	for l in [x for x in text.split('\n') if x != '']:
+		l = l.replace('\t', '')
+		if l.find(';') != -1:
+			l = l.split(';')[0]
+		
+		new_lines.append(l)
+	
+	return new_lines
+
+def parse(assembly):
+	for idx, l in enumerate(assembly.instructions):
+		line_start = l.split(' ')[0]
+		if line_start in DIRECTIVES: #handle preprocessor directive
+			content = handle_directive(l, idx, assembly)
+		elif line_start in OPERATIONS: #create instruction to be translated into machine code
+			content = handle_instruction(l, idx, assembly)
+		elif line_start.startswith('.'): #use different function for label creation as it is not actually a directive in any meaning
+			content = handle_label(l, assembly)
+		else:
+			raise CompilerError(f"Invalid instruction or compiler directive: '{line_start}'", idx)
+		
+		assembly.instructions[idx] = content
 
 def handle_preprocessor_directive(line, assembly):
 	if line.startswith("db"):
@@ -247,13 +253,10 @@ def handle_preprocessor_directive(line, assembly):
 
 def assemble(source):
 	assembly = Assembly()
-	lines = create_lines(source)
+
+	assembly.instructions = prepare_source(source)
 	
-	for idx, line in enumerate(lines):
-		l = handle_preprocessor_directive(line, assembly)
-		if l:
-			lines[idx] = l
-			continue
+	parse(assembly)
 	
 	return assembly
 
@@ -282,8 +285,6 @@ class Instruction(object):
 	def __repr__(self):
 		return f"[{self.op}] ({', '.join([str(x) for x in self.args])})"
 
-
-
 REG_INDICES = {
 	"ax": 0,
 	"al": 0,
@@ -293,10 +294,6 @@ REG_INDICES = {
 	"bh": 3,
 	"eax": 4
 }
-
-DIRECTIVES = [
-	"db"
-]
 
 ARG_TYPE_BYTE = 0b00000000
 ARG_TYPE_WORD = 0b10000000
@@ -388,4 +385,3 @@ def assemble_old(text):
 
 if __name__ == '__main__':
 	res = assemble(source)
-	print(res.binary.encode("utf-8"))
