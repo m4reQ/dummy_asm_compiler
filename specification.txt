@@ -70,12 +70,9 @@ bits:
 1 => argument type (0 for byte, 1 for word)
 2 - n => value
 
-if value is address it cannot be typed, means it can't be prefixed
-with byte or word keyword (because we only support word size addresses)
+in some cases specifying the type of argument is pointless as it will always use specific type
 example:
-0x00 jmp .Location      ;valid
-0x02 jmp byte .Location ;invalid
-0x04 jmp word .Location ;technically valid but will throw an error during compilation
+0x0 jmp byte 0x6 ;argument will always be word size, even though we request it to be byte size
 
 comment structure:
 ;[comment]
