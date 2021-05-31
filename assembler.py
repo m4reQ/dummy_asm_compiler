@@ -6,6 +6,9 @@ db 6, 7
 dw 0x8
 resb 7
 resw 2
+jmp $
+push word 500 ;push 500 as a word onto the stack
+pop byte 2
 .Label
 	add ax, word [.Data]
 	sys 0x1
@@ -17,37 +20,44 @@ resw 2
 .EmptySpace
 	resb 10
 """
-# output: b"\xc2\x80@\x05\xc2\x80D@\xc2\x81D\xc2\x85B\x03test\x00B\x10E\x03\x04\xc2\x80D\x0b\x08G\x15\x03"
 
 OPERATIONS = {
-	"add":  0b10000000,
-	"adc":  0b10000001,
-	"div":  0b10000010,
-	"mul":  0b10000011,
-	"sub":  0b10000100,
-	"sbb":  0b10000101,
-	"and":  0b01000110,
-	"or":   0b01000111,
-	"xor":  0b01001000,
-	"sl":   0b01001001,
-	"sr":   0b01001010,
-	"not":  0b00001011,
-	"call": 0b01001100,
-	"ret":  0b00001101,
-	"sys":  0b01001110,
-	"inc":  0b01001111,
-	"dec":  0b01010000,
-	"hlt":  0b00010001,
-	"int":  0b01010010,
-	"jmp":  0b01010011,
-	"jeq":  0b01010100,
-	"jne":  0b01010101,
-	"mov":  0b10010110,
-	"nop":  0b00010111,
-	"pop":  0b00011000,
-	"push": 0b01011001,
-	"test": 0b10011010
+	"add":   0b10000000,
+	"adc":   0b10000001,
+	"div":   0b10000010,
+	"mul":   0b10000011,
+	"sub":   0b10000100,
+	"sbb":   0b10000101,
+	"and":   0b01000110,
+	"or":    0b01000111,
+	"xor":   0b01001000,
+	"sl":    0b01001001,
+	"sr":    0b01001010,
+	"not":   0b00001011,
+	"call":  0b01001100,
+	"ret":   0b00001101,
+	"sys":   0b01001110,
+	"inc":   0b01001111,
+	"dec":   0b01010000,
+	"hlt":   0b00010001,
+	"int":   0b01010010,
+	"jmp":   0b01010011,
+	"jeq":   0b01010100,
+	"jne":   0b01010101,
+	"mov":   0b10010110,
+	"nop":   0b00010111,
+	"pop":   0b01011000,
+	"push":  0b01011001,
+	"pushf": 0b00011010,
+	"popf":  0b00011011,
+	"test":  0b10011100
 }
+
+NON_TYPED_OPERATIONS = [
+	"jmp",
+	"jeq",
+	"jne"
+]
 
 DIRECTIVES = [
 	"db",
@@ -57,11 +67,32 @@ DIRECTIVES = [
 	"const"
 ]
 
+REGISTER_LITERALS = {
+	"ax": 0x0,
+	"al": 0x0,
+	"ah": 0x1,
+	"bx": 0x2,
+	"bl": 0x2,
+	"bh": 0x3,
+	"cx": 0x4,
+	"cl": 0x4,
+	"ch": 0x5,
+	"dx": 0x6,
+	"dl": 0x6,
+	"dh": 0x7,
+	"sp": 0x8,
+	"bp": 0xa
+}
+
 ARG_TYPE_BYTE = 0
 ARG_TYPE_WORD = 16384
 
 ARG_TYPE_ADDRESS = 0
 ARG_TYPE_VALUE = 32768
+
+ARGS_COUNT_MASK = 0b11000000
+
+INDIRECT_MODE_MASK = 0b00100000
 
 class Assembly(object):
 	def __init__(self):
@@ -74,7 +105,8 @@ class Assembly(object):
 class Instruction(object):
 	def __init__(self):
 		self.address = 0
-		self.operation = None
+		self.operation = ""
+		self.opcode = 0b0
 		self.args = []
 
 	def __repr__(self):
@@ -168,14 +200,16 @@ def handle_directive(line, line_idx, assembly):
 		count = try_convert_to_int(args[1])
 		if count is None:
 			raise CompilerError(f"Invalid argument for reserve byte directive: '{args[1]}'", line_idx)
-		directive.representation += '\0' * count
+		assembly.size += count
 	elif dir == "resw":
 		args = line.split(' ')
 		if len(args) < 2:
 			raise CompilerError(f"Didn't specify arguments for reserve word directive.", line_idx)
 		
 		count = try_convert_to_int(args[1])
-		directive.representation += "\0\0" * count
+		if count is None:
+			raise CompilerError(f"Invalid argument for reserve word directive: '{args[1]}'", line_idx)
+		assembly.size += count * 2
 	
 	assembly.size += len(directive.representation)
 
@@ -188,7 +222,53 @@ def handle_label(line, assembly):
 	return Directive()
 
 def handle_instruction(line, line_idx, assembly):
-	return None
+	mnemonic = line.split(' ')[0]
+	opcode = OPERATIONS[mnemonic]
+	args = line.replace(mnemonic, '').replace(' ', '').split(',')
+
+	args_count = (opcode & ARGS_COUNT_MASK) >> 6
+	if len(args) != args_count:
+		raise CompilerError(f"Invalid args count for operation '{mnemonic}': {len(args)}", line_idx)
+	
+	inst = Instruction()
+	inst.address = assembly.size
+	inst.operation = mnemonic
+	inst.opcode = opcode
+
+	for arg in args:
+		parse_arg(arg, line_idx, inst, assembly)
+	
+	return inst
+
+def parse_arg(arg, line_idx, inst, assembly):
+	arg_i = Argument()
+
+	is_address = False
+
+	if arg.startswith("byte"):
+		arg_i.type = ArgType.Byte
+	elif arg.startswith("word"):
+		arg_i.type = ArgType.Word
+	else:
+		is_address = True
+	
+	if arg_i.type and inst.operation in NON_TYPED_OPERATIONS: #check if operation is non typed
+		raise CompilerError(f"{inst.operation} is not typed, but the agument type was specified.", line_idx)
+	
+	if is_address:
+		inst.opcode += INDIRECT_MODE_MASK
+	
+	arg = arg.replace(arg_type, '')
+
+	if arg == "$": #first check if arg is a wildcard address character
+		value = inst.address
+	elif arg.startswith('.'): #check if argument is a label and get memory address of that label
+		if arg not in assembly.labels:
+			raise CompilerError(f"Invalid label name: '{arg.replace('.', '')}'", line_idx)
+	
+	inst.args.append(arg_i)
+
+	#add ax, word [.Data]
 
 def prepare_source(text):
 	new_lines = []
@@ -258,6 +338,10 @@ def handle_preprocessor_directive(line, assembly):
 
 	return None
 
+def write_to_file(text, filename):
+	with open(filename, "wb") as f:
+		f.write(text.encode("UTF-8"))
+
 def assemble(source):
 	assembly = Assembly()
 
@@ -265,129 +349,6 @@ def assemble(source):
 	
 	parse(assembly)
 	
-	return assembly
-
-
-class DBDirective(object):
-	def __init__(self, text, term_char):
-		self.text = text
-		self.term_char = term_char
-	
-	def __repr__(self):
-		return f"[db] ({self.text}, {self.term_char})"
-
-class Assembly_OLD(object):
-	def __init__(self):
-		self.labels = {}
-		self.instructions = []
-		self.size = 0
-		self.binary = ""
-
-class Instruction(object):
-	def __init__(self, op, args, addr):
-		self.op = op
-		self.args = args
-		self.addr = addr
-
-	def __repr__(self):
-		return f"[{self.op}] ({', '.join([str(x) for x in self.args])})"
-
-REG_INDICES = {
-	"ax": 0,
-	"al": 0,
-	"ah": 1,
-	"bx": 2,
-	"bl": 2,
-	"bh": 3,
-	"eax": 4
-}
-
-ARG_TYPE_BYTE = 0b00000000
-ARG_TYPE_WORD = 0b10000000
-
-ARGS_COUNT_MASK = 0b00000110
-ARG_REGISTER_IDX_MASK = 0b01000000
-
-def split(text):
-	lines = [x for x in text.split('\n') if x != '']
-	newLines = []
-
-	for l in lines:
-		formatted = l.replace('\t', '')
-		newLines.append(formatted)
-
-	return newLines
-
-def write_to_file(text, filename):
-	with open(filename, "wb") as f:
-		f.write(text.encode("UTF-8"))
-
-def assemble_old(text):
-	assembly = Assembly()
-
-	lines = split(text)
-	curr_addr = 0
-
-	for line in lines:
-		if line.startswith('.'):
-			assembly.labels[line] = curr_addr
-			continue
-		
-		firstSpaceIdx = line.find(' ')
-		if firstSpaceIdx != -1:
-			opcode = line[:firstSpaceIdx]
-		else:
-			opcode = line
-		args = line[firstSpaceIdx:].replace(' ', '').split(',')
-
-		if firstSpaceIdx == 2:
-			#directives
-			if opcode == "db":
-				string = args[0].replace('"', '')
-				assembly.instructions.append(DBDirective(string, chr(int(args[1]))))
-				curr_addr += len(string) + 1
-		elif firstSpaceIdx == 3:
-			#operations
-			if opcode in OPERATIONS.keys():
-				op = OPERATIONS[opcode]
-				assembly.instructions.append(Instruction(op, args, curr_addr))
-				curr_addr += 1 + (op.opcode >> ARGS_COUNT_MASK)
-		else:
-			#operations (0 arguments)
-			op = OPERATIONS[opcode]
-			assembly.instructions.append(Instruction(op, [], curr_addr))
-			curr_addr += 1
-
-	for inst in assembly.instructions:
-		if isinstance(inst, DBDirective):
-			assembly.size += len(inst.text) + 1
-			continue
-
-		for idx, arg in enumerate(inst.args):
-			if arg.startswith('.'):
-				labelAddr = assembly.labels[arg]
-				inst.args[idx] = int(labelAddr + 0b00000000)
-			elif arg == '$':
-				inst.args[idx] = int(inst.addr)
-			elif arg in REG_INDICES.keys():
-				inst.args[idx] = int(REG_INDICES[arg] + ARG_REGISTER_IDX_MASK)
-			elif arg.startswith("byte"):
-				inst.args[idx] = int(arg.replace("byte", '')) + ARG_TYPE_BYTE
-			elif arg.startswith("word"):
-				inst.args[idx] = int(arg.replace("word", '')) + ARG_TYPE_WORD
-			
-		assembly.size += 1 + (inst.op.opcode >> ARGS_COUNT_MASK)
-		
-	for inst in assembly.instructions:
-		if isinstance(inst, DBDirective):
-			assembly.binary += inst.text
-			assembly.binary += inst.term_char
-			continue
-		
-		assembly.binary += chr(inst.op.opcode)
-		for arg in inst.args:
-			assembly.binary += chr(arg)
-
 	return assembly
 
 if __name__ == '__main__':

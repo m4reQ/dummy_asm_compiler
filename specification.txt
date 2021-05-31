@@ -8,15 +8,19 @@ operation structure:
 size: 1 byte
 0b00000000
 bits:
-2 - 8 => opcode
 0 - 2 => args count
+2 => is using indirect addressing (if 1 it interprets last argument as address of value rather than value itself)
+3 - 8 => opcode
 
 preprocessor directive structure:
 keyword [arg, ...]
 
 preprocessor keywords:
-db [*byte, optional:termination_character]: define bytes
-const [name, type value]: define constant
+db [value, ...]: define bytes
+dw [value, ...]: define words
+resb [count]: reserve given amount of bytes
+resw [count]: reserve given amount of words
+const [name type value]: define constant
 
 types:
 byte - 8 bits
@@ -26,21 +30,25 @@ address size: word
 
 reserved address values:
 0x0 -> accumulator
-0x2 -> base pointer
-0x4 -> stack pointer
-0x6 -> stack base pointer (always equal to 0xa)
-0x8 -> flags register
-0xa - 0x40a -> stack (1 kb)
+0x2 -> base register
+0x4 -> count register
+0x6 -> data register
+0x8 -> stack pointer
+0xa -> stack base pointer
+0xc -> flags register
+0xe - 0x40e -> stack (1 kb)
+note that these values doesn't mean actual memory locations (except the stack)
+but are used to index internal processor registers
 
-base program address: 0x40c (just after end of stack)
+base program address: 0x40f (just after end of stack)
 
-address wildcard character: $
-expands to address of used instruction
+address wildcard keyword: $
+expands to the address of used instruction
 example:
 0x00 jmp $     is the same as
 0x00 jmp 0x00
 
-value at address argument: [address]
+value at address keyword: [address]
 expands to the value found at given address
 example:
 0x00 "h"
@@ -50,7 +58,7 @@ example:
 
 label structure:
 .[label_name]
-expands to address of next instruction
+expands to address of instruction found right after the label
 
 argument structure:
 [type, value]
@@ -58,18 +66,29 @@ argument structure:
 value structure:
 0b00...
 bits:
-0 => is value or address (1 if value)
+0 => is value or address (1 if value) (corelated with value at address keyword)
 1 => argument type (0 for byte, 1 for word)
 2 - n => value
+
+if value is address it cannot be typed, means it can't be prefixed
+with byte or word keyword (because we only support word size addresses)
+example:
+0x00 jmp .Location      ;valid
+0x02 jmp byte .Location ;invalid
+0x04 jmp word .Location ;technically valid but will throw an error during compilation
 
 comment structure:
 ;[comment]
 
-register size: word
+register size: word (except of flags register)
+note: flags register cannot be accessed directly
+it can be done only via pushf
 
 registers literals:
 ax - acummulator
 bx - base register
+cx - count register
+dx - data register
 sp - stack pointer register
 bp - stack base pointer register
 
@@ -78,7 +97,7 @@ l - register's lower byte
 h - register's higher byte
 
 flags register structure:
-0b0000000000000000 (word)
+0b00000000 (byte)
 bits:
 0 => zero flag (set if operation result is 0)
 1 => sign flag (set if operation result is negative)
@@ -87,7 +106,7 @@ bits:
 4 => interruption flag (set if interrupts are enabled)
 5 => overflow flag (set if operation overflows register)
 6 => stack overflow flag (set if push* operation causes stack overflow)
-7 - 16 => unused
+7 => stack underflow flag (set if pop* operation causes stack underflow)
 
 operations list:
 add - add and store in ax, args: [register or value, register or value]
@@ -114,6 +133,8 @@ jeq - jump to address if zero flag set, args: same as jmp
 jne - jump to address if zero flag not set, args: same as jeq
 mov - move address to certain location to another, args: [register or memory address, register or memory address]
 nop - no operation, args: None
-pop - pop data from stack, args: None
+pop - pop data from stack, args: [number of bytes to pop]
 push - push data onto stack, args: [value]
+pushf - push flags register onto stack, args: None
+popf - pop flags register from stack, args: None
 test - logical AND and set zero flag if not equal, args: [value or register, value or register]
