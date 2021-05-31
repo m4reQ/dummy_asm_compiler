@@ -296,48 +296,6 @@ def parse(assembly):
 		
 		assembly.instructions[idx] = content
 
-def handle_preprocessor_directive(line, assembly):
-	if line.startswith("db"):
-		line = line.replace("db", '')
-		line = line.replace(' ', '')
-		
-		args = line.split(',')
-		if len(args) not in [1, 2]:
-			raise CompilerError(f"Preprocessor error: Invalid 'db' args count: {len(args)}")
-		
-		if args[0].find('"') != -1:
-			new_line = args[0].replace('"', '')
-		else:
-			new_line = chr(int(args[0]))
-		if len(args) == 2:
-			new_line += chr(int(args[1]))
-
-		assembly.line_addresses.append(len(new_line))
-		return new_line
-	elif line.startswith("const"):
-		line = line.replace("const", '')
-		line = line.replace(' ', '')
-		
-		args = line.split(',')
-		if len(args) != 2:
-			raise CompilerError(f"Preprocessor error: Invalid 'const' args count: {len(args)}")
-
-		if args[1].startswith("byte"):
-			arg = args[1].replace("byte", '')
-			arg = int(arg) + ARG_TYPE_BYTE
-		elif args[1].startswith("word"):
-			arg = args[1].replace("word", '')
-			arg = int(arg) + ARG_TYPE_WORD
-		else:
-			raise CompilerError(f"Preprocessor error: invalid type of argument: '{args[1]}'")
-
-		const_name = args[0]
-		const_value = arg
-
-		assembly.constants[const_name] = const_value
-
-	return None
-
 def write_to_file(text, filename):
 	with open(filename, "wb") as f:
 		f.write(text.encode("UTF-8"))
